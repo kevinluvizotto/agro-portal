@@ -1,0 +1,20 @@
+name: CI (Portal)
+
+on:
+  pull_request:
+    branches: [ "development" ]
+  push:
+    branches: [ "development" ]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Basic check
+        run: |
+          test -f index.html || test -f login.html
+          echo "Portal files OK"
