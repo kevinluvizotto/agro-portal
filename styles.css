@@ -1,0 +1,176 @@
+/* styles.css - Agro login (orgânico, textura, tons terra) */
+
+:root {
+    --bg: #f6f1e7; /* papel */
+    --ink: #1d2b24; /* texto */
+    --muted: #5b6b63;
+    --leaf: #2f6f4e; /* verde folha */
+    --leaf-2: #1f5a3d;
+    --soil: #8a5a36; /* terra */
+    --clay: #c58a4a; /* argila */
+    --sun: #e8b04e; /* dourado */
+
+    --card: rgba(255,255,255,.86);
+    --border: rgba(29,43,36,.10);
+    --shadow: 0 18px 55px rgba(12, 18, 15, .12);
+}
+
+/* Fundo com gradientes “naturais” + grão */
+body.bg-light {
+    background: radial-gradient(900px 520px at 10% 10%, rgba(47,111,78,.18), transparent 60%), radial-gradient(800px 480px at 90% 15%, rgba(197,138,74,.20), transparent 55%), radial-gradient(900px 560px at 70% 90%, rgba(232,176,78,.15), transparent 60%), linear-gradient(180deg, #fbf7ef, var(--bg));
+    min-height: 100vh;
+    color: var(--ink);
+    position: relative;
+}
+
+    /* Grain overlay (SVG filter) */
+    body.bg-light::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: .12;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.35'/%3E%3C/svg%3E");
+        mix-blend-mode: multiply;
+    }
+
+/* Card */
+.login-shell {
+    max-width: 980px;
+    margin: 0 auto;
+}
+
+.login-card {
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    overflow: hidden;
+    background: var(--card);
+    box-shadow: var(--shadow);
+}
+
+/* Painel esquerdo (identidade) */
+.login-aside {
+    position: relative;
+    padding: 26px 26px 22px 26px;
+    background: radial-gradient(700px 380px at 25% 15%, rgba(47,111,78,.22), transparent 55%), radial-gradient(620px 360px at 80% 10%, rgba(197,138,74,.22), transparent 55%), linear-gradient(140deg, rgba(255,255,255,.65), rgba(255,255,255,.35));
+}
+
+    .login-aside::after {
+        /* “blob” orgânico */
+        content: "";
+        position: absolute;
+        right: -120px;
+        top: -120px;
+        width: 320px;
+        height: 320px;
+        background: radial-gradient(circle at 30% 30%, rgba(47,111,78,.22), rgba(232,176,78,.10) 55%, transparent 70%);
+        border-radius: 44% 56% 60% 40% / 48% 42% 58% 52%;
+        filter: blur(0px);
+        opacity: .9;
+    }
+
+.brand-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .55rem;
+    border: 1px solid rgba(29,43,36,.14);
+    background: rgba(255,255,255,.55);
+    padding: .42rem .70rem;
+    border-radius: 999px;
+    font-weight: 700;
+    letter-spacing: .2px;
+}
+
+.brand-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--leaf), var(--sun));
+}
+
+.aside-title {
+    font-size: 1.55rem;
+    font-weight: 800;
+    margin: 14px 0 4px;
+    letter-spacing: .2px;
+}
+
+.aside-sub {
+    color: var(--muted);
+    margin-bottom: 16px;
+}
+
+.bullets {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--muted);
+}
+
+    .bullets li {
+        display: flex;
+        gap: .6rem;
+        align-items: flex-start;
+        margin: 10px 0;
+    }
+
+    .bullets svg {
+        flex: 0 0 auto;
+        margin-top: 2px;
+        opacity: .9;
+    }
+
+/* Form lado direito */
+.login-form {
+    padding: 30px 26px;
+    background: rgba(255,255,255,.65);
+}
+
+.form-label {
+    color: var(--muted);
+    font-weight: 700;
+    font-size: .9rem;
+}
+
+.form-control {
+    border-radius: 14px;
+    padding: .80rem .95rem;
+    border: 1px solid rgba(29,43,36,.16);
+    background: rgba(255,255,255,.82);
+}
+
+    .form-control:focus {
+        border-color: rgba(47,111,78,.45);
+        box-shadow: 0 0 0 .25rem rgba(47,111,78,.14);
+    }
+
+.btn-agro {
+    border: 0;
+    border-radius: 14px;
+    padding: .85rem 1rem;
+    font-weight: 800;
+    letter-spacing: .2px;
+    background: linear-gradient(90deg, var(--leaf-2), var(--leaf), var(--sun));
+    color: #0c1712;
+}
+
+    .btn-agro:hover {
+        filter: brightness(1.03);
+    }
+
+.small-help {
+    color: rgba(91,107,99,.95);
+}
+
+.divider {
+    height: 1px;
+    background: rgba(29,43,36,.10);
+    margin: 18px 0;
+}
+
+/* Responsivo: painel vira topo */
+@media (max-width: 991px) {
+    .login-aside::after {
+        display: none;
+    }
+}
