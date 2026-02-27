@@ -1,16 +1,63 @@
-﻿// app.js (Ingress rewrite-target: /$2 compatible)
+﻿// app.js 
 const cfg = window.APP_CONFIG;
 
 // ==============================
-// Helpers: URL + Auth
+// URL Helpers (corrige Invalid URL e padroniza chamadas)
 // ==============================
-function apiUrl(basePath, path = "") {
-  const base = String(basePath || "").replace(/\/+$/, ""); // "/alerts"
-  const p = String(path || "");
-  const fullPath = base + (p ? (p.startsWith("/") ? p : "/" + p) : "");
-  return new URL(fullPath, window.location.origin).toString();
+function isAbsUrl(v) {
+  return /^https?:\/\//i.test(String(v || ""));
 }
 
+function absBase(pathOrUrl) {
+  const v = String(pathOrUrl || "");
+  if (isAbsUrl(v)) return v;
+  if (v.startsWith("/")) return window.location.origin + v;
+  return window.location.origin + "/" + v;
+}
+
+function apiUrl(basePathOrUrl, endpointPath) {
+  const baseAbs = absBase(basePathOrUrl);
+  const base = baseAbs.endsWith("/") ? baseAbs : baseAbs + "/";
+  const rel = String(endpointPath || "").replace(/^\//, "");
+  return new URL(rel, base).toString();
+}
+
+async function fetchJsonByUrl(url, options = {}) {
+  const res = await fetch(url, options);
+
+  if (res.status === 401) {
+    window.location.href = "login.html";
+    return null;
+  }
+
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  const text = await res.text();
+
+  if (!res.ok) {
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+
+  if (!ct.includes("application/json")) {
+    // Isso evita "Unexpected token '<'" quando volta HTML
+    const preview = (text || "").slice(0, 200).replace(/\s+/g, " ");
+    throw new Error(`Resposta não-JSON (${ct || "sem content-type"}): ${preview}`);
+  }
+
+  return text ? JSON.parse(text) : null;
+}
+
+async function apiJson(base, path, options = {}) {
+  const url = apiUrl(base, path);
+  return fetchJsonByUrl(url, options);
+}
+
+function authHeaders() {
+  return { Authorization: `Bearer ${token}` };
+}
+
+// ==============================
+// Auth guard
+// ==============================
 const token = localStorage.getItem("agro_token");
 if (!token) window.location.href = "login.html";
 
@@ -22,10 +69,6 @@ document.getElementById("btnLogout").addEventListener("click", () => {
   window.location.href = "login.html";
 });
 
-function authHeaders() {
-  return { Authorization: `Bearer ${token}` };
-}
-
 // ==============================
 // Alerts
 // ==============================
@@ -34,9 +77,8 @@ function buildAlertsUrl() {
   const ack = document.getElementById("ack").value;
   const plotId = document.getElementById("filterPlotId").value.trim();
 
-  // CHAVE: /alerts/alerts  -> rewrite tira o primeiro /alerts e sobra /alerts no backend
+  // /alerts/alerts -> ingress rewrite => backend /alerts
   const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/alerts"));
-
   if (severity) url.searchParams.set("severity", severity);
   if (ack) url.searchParams.set("ack", ack);
   if (plotId) url.searchParams.set("plotId", plotId);
@@ -51,11 +93,12 @@ async function loadAlerts() {
   alertsMsg.textContent = "Carregando...";
 
   try {
-    const res = await fetch(buildAlertsUrl(), { headers: { ...authHeaders() } });
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
+    const items = await fetchJsonByUrl(buildAlertsUrl(), {
+      headers: { ...authHeaders() }
+    });
 
-    const items = await res.json();
+    if (!items) return;
+
     alertsMsg.textContent = items.length ? "" : "Nenhum alerta encontrado.";
 
     for (const a of items) {
@@ -93,11 +136,9 @@ async function loadAlerts() {
 }
 
 async function ackAlert(id) {
-  // /alerts/alerts/{id}/ack -> rewrite => /alerts/{id}/ack
-  await fetch(apiUrl(cfg.ALERTS_BASE_URL, `/alerts/${id}/ack`), {
-    method: "PUT",
-    headers: { ...authHeaders() }
-  });
+  const url = apiUrl(cfg.ALERTS_BASE_URL, `/alerts/${id}/ack`);
+  const res = await fetch(url, { method: "PUT", headers: { ...authHeaders() } });
+  if (res.status === 401) window.location.href = "login.html";
 }
 
 document.getElementById("btnRefresh").addEventListener("click", loadAlerts);
@@ -124,16 +165,15 @@ async function loadHistory() {
   }
 
   try {
-    // /telemetry/telemetry/readings -> rewrite => /telemetry/readings
     const url = new URL(apiUrl(cfg.TELEMETRY_BASE_URL, "/telemetry/readings"));
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("take", "200");
 
-    const res = await fetch(url.toString(), { headers: { ...authHeaders() } });
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
+    const items = await fetchJsonByUrl(url.toString(), {
+      headers: { ...authHeaders() }
+    });
+    if (!items) return;
 
-    const items = await res.json();
     if (!items.length) {
       historyMsg.textContent = "Sem histórico para este talhão.";
       if (historyChart) { historyChart.destroy(); historyChart = null; }
@@ -187,12 +227,11 @@ async function loadProperties() {
   if (btnNewPlot) btnNewPlot.disabled = true;
 
   try {
-    // /properties/properties -> rewrite => /properties
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/properties"), { headers: { ...authHeaders() } });
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
+    const items = await apiJson(cfg.PROPERTIES_BASE_URL, "/properties", {
+      headers: { ...authHeaders() }
+    });
+    if (!items) return;
 
-    const items = await res.json();
     sel.innerHTML = `<option value="">Selecione...</option>`;
 
     for (const p of items) {
@@ -217,14 +256,12 @@ async function loadPlots(propertyId) {
   plotSel.innerHTML = `<option value="">Carregando talhões...</option>`;
 
   try {
-    // /properties/properties/{id}/plots -> rewrite => /properties/{id}/plots
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`), { headers: { ...authHeaders() } });
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
+    const items = await apiJson(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`, {
+      headers: { ...authHeaders() }
+    });
+    if (!items) return;
 
-    const items = await res.json();
     plotSel.innerHTML = `<option value="">Selecione...</option>`;
-
     for (const pl of items) {
       const opt = document.createElement("option");
       opt.value = pl.id;
@@ -316,14 +353,11 @@ document.getElementById("btnSaveProperty")?.addEventListener("click", async () =
   }
 
   try {
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/properties"), {
+    await apiJson(cfg.PROPERTIES_BASE_URL, "/properties", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, location })
     });
-
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
 
     modalProperty?.hide();
     await loadProperties();
@@ -356,14 +390,11 @@ document.getElementById("btnSavePlot")?.addEventListener("click", async () => {
   }
 
   try {
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`), {
+    await apiJson(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, crop })
     });
-
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
 
     modalPlot?.hide();
     await loadPlots(propertyId);
@@ -392,34 +423,34 @@ document.getElementById("btnSend").addEventListener("click", async () => {
   const temperatureC = Number(document.getElementById("temperatureC").value);
   const precipitationMm = Number(document.getElementById("precipitationMm").value);
 
-  const body = { plotId, timestamp: new Date().toISOString(), soilMoisture, temperatureC, precipitationMm };
+  const body = {
+    plotId,
+    timestamp: new Date().toISOString(),
+    soilMoisture,
+    temperatureC,
+    precipitationMm
+  };
 
   try {
-    // /telemetry/telemetry/readings -> rewrite => /telemetry/readings
-    const res = await fetch(apiUrl(cfg.TELEMETRY_BASE_URL, "/telemetry/readings"), {
+    const data = await apiJson(cfg.TELEMETRY_BASE_URL, "/telemetry/readings", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body)
     });
+    if (!data) return;
 
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
-
-    const data = await res.json();
     sendMsg.className = "small mt-2 text-success";
     sendMsg.textContent = "Leitura enviada! Id: " + (data.id || "(ok)");
 
     await loadAlerts();
     await loadHistory();
+    await refreshPlotStatus(plotId);
   } catch (e) {
     sendMsg.className = "small mt-2 text-danger";
     sendMsg.textContent = "Erro ao enviar leitura: " + e.message;
   }
 });
 
-// ==============================
-// Status do Talhão
-// ==============================
 async function refreshPlotStatus(plotId) {
   const badge = document.getElementById("plotStatusBadge");
   if (!badge) return;
@@ -432,11 +463,11 @@ async function refreshPlotStatus(plotId) {
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("ack", "false");
 
-    const res = await fetch(url.toString(), { headers: { ...authHeaders() } });
-    if (res.status === 401) return (window.location.href = "login.html");
-    if (!res.ok) throw new Error(await res.text());
+    const alerts = await fetchJsonByUrl(url.toString(), {
+      headers: { ...authHeaders() }
+    });
+    if (!alerts) return;
 
-    const alerts = await res.json();
     const hasDrought = alerts.some(a => a.type === "LOW_MOISTURE");
 
     if (hasDrought) {
@@ -454,11 +485,9 @@ async function refreshPlotStatus(plotId) {
   }
 }
 
-// ==============================
 // Inicialização
-// ==============================
 window.addEventListener("DOMContentLoaded", async () => {
-  await loadAlerts();
-  await loadProperties();
+  await loadProperties();   // primeiro carrega base do app
+  await loadAlerts();       // depois tenta alertas (sem plotId ainda, mas ok)
   initModals();
 });
