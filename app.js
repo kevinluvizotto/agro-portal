@@ -1,25 +1,31 @@
-﻿// app.js 
-const cfg = window.APP_CONFIG;
+﻿// app.js (fix 404 no browser + logs melhores)
+const cfgRaw = window.APP_CONFIG || {};
 
-// ==============================
-// URL Helpers (corrige Invalid URL e padroniza chamadas)
-// ==============================
-function isAbsUrl(v) {
-  return /^https?:\/\//i.test(String(v || ""));
+function normalizePrefix(prefix) {
+  const parts = String(prefix || "").split("/").filter(Boolean);
+  // Se alguém colocou /properties/properties no config, normaliza para /properties
+  while (parts.length >= 2 && parts[parts.length - 1] === parts[parts.length - 2]) parts.pop();
+  return "/" + parts.join("/");
 }
 
-function absBase(pathOrUrl) {
-  const v = String(pathOrUrl || "");
-  if (isAbsUrl(v)) return v;
-  if (v.startsWith("/")) return window.location.origin + v;
-  return window.location.origin + "/" + v;
+const cfg = {
+  ...cfgRaw,
+  IDENTITY_BASE_URL: normalizePrefix(cfgRaw.IDENTITY_BASE_URL || "/identity"),
+  PROPERTIES_BASE_URL: normalizePrefix(cfgRaw.PROPERTIES_BASE_URL || "/properties"),
+  TELEMETRY_BASE_URL: normalizePrefix(cfgRaw.TELEMETRY_BASE_URL || "/telemetry"),
+  ALERTS_BASE_URL: normalizePrefix(cfgRaw.ALERTS_BASE_URL || "/alerts")
+};
+
+// Monta SEMPRE a rota "externa" correta para o Ingress: prefix + internalPath
+// Ex: prefix=/properties + internalPath=properties -> /properties/properties
+function ingressPath(prefix, internalPath) {
+  const p = normalizePrefix(prefix).replace(/\/+$/, "");
+  const ip = String(internalPath || "").replace(/^\/+/, "");
+  return `${p}/${ip}`;
 }
 
-function apiUrl(basePathOrUrl, endpointPath) {
-  const baseAbs = absBase(basePathOrUrl);
-  const base = baseAbs.endsWith("/") ? baseAbs : baseAbs + "/";
-  const rel = String(endpointPath || "").replace(/^\//, "");
-  return new URL(rel, base).toString();
+function ingressUrl(prefix, internalPath) {
+  return new URL(ingressPath(prefix, internalPath), window.location.origin).toString();
 }
 
 async function fetchJsonByUrl(url, options = {}) {
@@ -34,25 +40,16 @@ async function fetchJsonByUrl(url, options = {}) {
   const text = await res.text();
 
   if (!res.ok) {
-    throw new Error(text || `HTTP ${res.status}`);
+    const preview = (text || "").slice(0, 200).replace(/\s+/g, " ");
+    throw new Error(`HTTP ${res.status} @ ${url} :: ${preview || "(sem body)"}`);
   }
 
   if (!ct.includes("application/json")) {
-    // Isso evita "Unexpected token '<'" quando volta HTML
     const preview = (text || "").slice(0, 200).replace(/\s+/g, " ");
-    throw new Error(`Resposta não-JSON (${ct || "sem content-type"}): ${preview}`);
+    throw new Error(`Resposta não-JSON (${ct || "sem content-type"}) @ ${url} :: ${preview}`);
   }
 
   return text ? JSON.parse(text) : null;
-}
-
-async function apiJson(base, path, options = {}) {
-  const url = apiUrl(base, path);
-  return fetchJsonByUrl(url, options);
-}
-
-function authHeaders() {
-  return { Authorization: `Bearer ${token}` };
 }
 
 // ==============================
@@ -69,6 +66,10 @@ document.getElementById("btnLogout").addEventListener("click", () => {
   window.location.href = "login.html";
 });
 
+function authHeaders() {
+  return { Authorization: `Bearer ${token}` };
+}
+
 // ==============================
 // Alerts
 // ==============================
@@ -77,8 +78,8 @@ function buildAlertsUrl() {
   const ack = document.getElementById("ack").value;
   const plotId = document.getElementById("filterPlotId").value.trim();
 
-  // /alerts/alerts -> ingress rewrite => backend /alerts
-  const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/alerts"));
+  const url = new URL(ingressUrl(cfg.ALERTS_BASE_URL, "alerts")); // /alerts/alerts
+
   if (severity) url.searchParams.set("severity", severity);
   if (ack) url.searchParams.set("ack", ack);
   if (plotId) url.searchParams.set("plotId", plotId);
@@ -96,7 +97,6 @@ async function loadAlerts() {
     const items = await fetchJsonByUrl(buildAlertsUrl(), {
       headers: { ...authHeaders() }
     });
-
     if (!items) return;
 
     alertsMsg.textContent = items.length ? "" : "Nenhum alerta encontrado.";
@@ -136,7 +136,8 @@ async function loadAlerts() {
 }
 
 async function ackAlert(id) {
-  const url = apiUrl(cfg.ALERTS_BASE_URL, `/alerts/${id}/ack`);
+  // /alerts/alerts/{id}/ack
+  const url = ingressUrl(cfg.ALERTS_BASE_URL, `alerts/${id}/ack`);
   const res = await fetch(url, { method: "PUT", headers: { ...authHeaders() } });
   if (res.status === 401) window.location.href = "login.html";
 }
@@ -165,7 +166,8 @@ async function loadHistory() {
   }
 
   try {
-    const url = new URL(apiUrl(cfg.TELEMETRY_BASE_URL, "/telemetry/readings"));
+    // /telemetry/telemetry/readings?plotId=...&take=200
+    const url = new URL(ingressUrl(cfg.TELEMETRY_BASE_URL, "telemetry/readings"));
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("take", "200");
 
@@ -227,9 +229,9 @@ async function loadProperties() {
   if (btnNewPlot) btnNewPlot.disabled = true;
 
   try {
-    const items = await apiJson(cfg.PROPERTIES_BASE_URL, "/properties", {
-      headers: { ...authHeaders() }
-    });
+    // /properties/properties
+    const url = ingressUrl(cfg.PROPERTIES_BASE_URL, "properties");
+    const items = await fetchJsonByUrl(url, { headers: { ...authHeaders() } });
     if (!items) return;
 
     sel.innerHTML = `<option value="">Selecione...</option>`;
@@ -256,9 +258,9 @@ async function loadPlots(propertyId) {
   plotSel.innerHTML = `<option value="">Carregando talhões...</option>`;
 
   try {
-    const items = await apiJson(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`, {
-      headers: { ...authHeaders() }
-    });
+    // /properties/properties/{id}/plots
+    const url = ingressUrl(cfg.PROPERTIES_BASE_URL, `properties/${propertyId}/plots`);
+    const items = await fetchJsonByUrl(url, { headers: { ...authHeaders() } });
     if (!items) return;
 
     plotSel.innerHTML = `<option value="">Selecione...</option>`;
@@ -353,7 +355,9 @@ document.getElementById("btnSaveProperty")?.addEventListener("click", async () =
   }
 
   try {
-    await apiJson(cfg.PROPERTIES_BASE_URL, "/properties", {
+    // POST /properties/properties
+    const url = ingressUrl(cfg.PROPERTIES_BASE_URL, "properties");
+    await fetchJsonByUrl(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, location })
@@ -390,7 +394,9 @@ document.getElementById("btnSavePlot")?.addEventListener("click", async () => {
   }
 
   try {
-    await apiJson(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`, {
+    // POST /properties/properties/{id}/plots
+    const url = ingressUrl(cfg.PROPERTIES_BASE_URL, `properties/${propertyId}/plots`);
+    await fetchJsonByUrl(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, crop })
@@ -432,7 +438,9 @@ document.getElementById("btnSend").addEventListener("click", async () => {
   };
 
   try {
-    const data = await apiJson(cfg.TELEMETRY_BASE_URL, "/telemetry/readings", {
+    // POST /telemetry/telemetry/readings
+    const url = ingressUrl(cfg.TELEMETRY_BASE_URL, "telemetry/readings");
+    const data = await fetchJsonByUrl(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body)
@@ -459,7 +467,7 @@ async function refreshPlotStatus(plotId) {
   badge.textContent = "Carregando...";
 
   try {
-    const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/alerts"));
+    const url = new URL(ingressUrl(cfg.ALERTS_BASE_URL, "alerts")); // /alerts/alerts
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("ack", "false");
 
@@ -487,7 +495,7 @@ async function refreshPlotStatus(plotId) {
 
 // Inicialização
 window.addEventListener("DOMContentLoaded", async () => {
-  await loadProperties();   // primeiro carrega base do app
-  await loadAlerts();       // depois tenta alertas (sem plotId ainda, mas ok)
+  await loadProperties();
+  await loadAlerts();
   initModals();
 });
