@@ -1,5 +1,17 @@
-﻿// app.js
+﻿// app.js (AKS/Ingress friendly)
 const cfg = window.APP_CONFIG;
+
+// ==============================
+// Helpers: URL + Auth
+// ==============================
+function apiUrl(basePath, path = "/") {
+  // basePath: "/alerts" | "/telemetry" | "/properties" | "/identity"
+  // path: "/readings" | "/{id}/ack" | "/"
+  const base = String(basePath || "").replace(/\/+$/, ""); // remove trailing /
+  const p = String(path || "/");
+  const fullPath = base + (p.startsWith("/") ? p : "/" + p);
+  return new URL(fullPath, window.location.origin).toString();
+}
 
 const token = localStorage.getItem("agro_token");
 if (!token) window.location.href = "login.html";
@@ -24,7 +36,8 @@ function buildAlertsUrl() {
   const ack = document.getElementById("ack").value;
   const plotId = document.getElementById("filterPlotId").value.trim();
 
-  const url = new URL(cfg.ALERTS_BASE_URL + "/alerts");
+  // GET /alerts  (base "/alerts" + path "/")
+  const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/"));
   if (severity) url.searchParams.set("severity", severity);
   if (ack) url.searchParams.set("ack", ack);
   if (plotId) url.searchParams.set("plotId", plotId);
@@ -81,7 +94,8 @@ async function loadAlerts() {
 }
 
 async function ackAlert(id) {
-  await fetch(`${cfg.ALERTS_BASE_URL}/alerts/${id}/ack`, {
+  // PUT /alerts/{id}/ack  (base "/alerts" + path "/{id}/ack")
+  await fetch(apiUrl(cfg.ALERTS_BASE_URL, `/${id}/ack`), {
     method: "PUT",
     headers: { ...authHeaders() }
   });
@@ -111,7 +125,8 @@ async function loadHistory() {
   }
 
   try {
-    const url = new URL(cfg.TELEMETRY_BASE_URL + "/telemetry/readings");
+    // GET /telemetry/readings?plotId=...&take=200  (base "/telemetry" + path "/readings")
+    const url = new URL(apiUrl(cfg.TELEMETRY_BASE_URL, "/readings"));
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("take", "200");
 
@@ -173,7 +188,8 @@ async function loadProperties() {
   if (btnNewPlot) btnNewPlot.disabled = true;
 
   try {
-    const res = await fetch(`${cfg.PROPERTIES_BASE_URL}/properties`, { headers: { ...authHeaders() } });
+    // GET /properties (base "/properties" + path "/")
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/"), { headers: { ...authHeaders() } });
     if (res.status === 401) return (window.location.href = "login.html");
     if (!res.ok) throw new Error(await res.text());
 
@@ -202,7 +218,8 @@ async function loadPlots(propertyId) {
   plotSel.innerHTML = `<option value="">Carregando talhões...</option>`;
 
   try {
-    const res = await fetch(`${cfg.PROPERTIES_BASE_URL}/properties/${propertyId}/plots`, { headers: { ...authHeaders() } });
+    // GET /properties/{propertyId}/plots  (base "/properties" + path "/{propertyId}/plots")
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/${propertyId}/plots`), { headers: { ...authHeaders() } });
     if (res.status === 401) return (window.location.href = "login.html");
     if (!res.ok) throw new Error(await res.text());
 
@@ -211,7 +228,7 @@ async function loadPlots(propertyId) {
     plotSel.innerHTML = `<option value="">Selecione...</option>`;
     for (const pl of items) {
       const opt = document.createElement("option");
-      opt.value = pl.id; // plotId
+      opt.value = pl.id;
       opt.textContent = `${pl.name} — ${pl.crop} (${pl.status})`;
       plotSel.appendChild(opt);
     }
@@ -300,7 +317,8 @@ document.getElementById("btnSaveProperty")?.addEventListener("click", async () =
   }
 
   try {
-    const res = await fetch(`${cfg.PROPERTIES_BASE_URL}/properties`, {
+    // POST /properties (base "/properties" + path "/")
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/"), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, location })
@@ -340,7 +358,8 @@ document.getElementById("btnSavePlot")?.addEventListener("click", async () => {
   }
 
   try {
-    const res = await fetch(`${cfg.PROPERTIES_BASE_URL}/properties/${propertyId}/plots`, {
+    // POST /properties/{propertyId}/plots
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/${propertyId}/plots`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, crop })
@@ -385,7 +404,8 @@ document.getElementById("btnSend").addEventListener("click", async () => {
   };
 
   try {
-    const res = await fetch(`${cfg.TELEMETRY_BASE_URL}/telemetry/readings`, {
+    // POST /telemetry/readings (base "/telemetry" + path "/readings")
+    const res = await fetch(apiUrl(cfg.TELEMETRY_BASE_URL, "/readings"), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body)
@@ -406,6 +426,9 @@ document.getElementById("btnSend").addEventListener("click", async () => {
   }
 });
 
+// ==============================
+// Status do Talhão
+// ==============================
 async function refreshPlotStatus(plotId) {
   const badge = document.getElementById("plotStatusBadge");
   if (!badge) return;
@@ -414,8 +437,8 @@ async function refreshPlotStatus(plotId) {
   badge.textContent = "Carregando...";
 
   try {
-    // Se existe alerta pendente de seca -> status = Alerta de Seca
-    const url = new URL(cfg.ALERTS_BASE_URL + "/alerts");
+    // GET /alerts?plotId=...&ack=false  (base "/alerts" + path "/")
+    const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/"));
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("ack", "false");
 
@@ -424,7 +447,6 @@ async function refreshPlotStatus(plotId) {
     if (!res.ok) throw new Error(await res.text());
 
     const alerts = await res.json();
-
     const hasDrought = alerts.some(a => a.type === "LOW_MOISTURE");
 
     if (hasDrought) {
@@ -433,7 +455,6 @@ async function refreshPlotStatus(plotId) {
       return;
     }
 
-    // (opcional) Risco de Praga -> a gente implementa depois
     badge.className = "badge text-bg-success";
     badge.textContent = "Normal";
   } catch (e) {
@@ -443,7 +464,9 @@ async function refreshPlotStatus(plotId) {
   }
 }
 
-// Inicialização (garante que roda quando DOM existe)
+// ==============================
+// Inicialização
+// ==============================
 window.addEventListener("DOMContentLoaded", async () => {
   await loadAlerts();
   await loadProperties();
