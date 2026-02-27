@@ -1,15 +1,13 @@
-﻿// app.js (AKS/Ingress friendly)
+﻿// app.js (Ingress rewrite-target: /$2 compatible)
 const cfg = window.APP_CONFIG;
 
 // ==============================
 // Helpers: URL + Auth
 // ==============================
-function apiUrl(basePath, path = "/") {
-  // basePath: "/alerts" | "/telemetry" | "/properties" | "/identity"
-  // path: "/readings" | "/{id}/ack" | "/"
-  const base = String(basePath || "").replace(/\/+$/, ""); // remove trailing /
-  const p = String(path || "/");
-  const fullPath = base + (p.startsWith("/") ? p : "/" + p);
+function apiUrl(basePath, path = "") {
+  const base = String(basePath || "").replace(/\/+$/, ""); // "/alerts"
+  const p = String(path || "");
+  const fullPath = base + (p ? (p.startsWith("/") ? p : "/" + p) : "");
   return new URL(fullPath, window.location.origin).toString();
 }
 
@@ -36,8 +34,9 @@ function buildAlertsUrl() {
   const ack = document.getElementById("ack").value;
   const plotId = document.getElementById("filterPlotId").value.trim();
 
-  // GET /alerts  (base "/alerts" + path "/")
-  const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/"));
+  // CHAVE: /alerts/alerts  -> rewrite tira o primeiro /alerts e sobra /alerts no backend
+  const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/alerts"));
+
   if (severity) url.searchParams.set("severity", severity);
   if (ack) url.searchParams.set("ack", ack);
   if (plotId) url.searchParams.set("plotId", plotId);
@@ -94,8 +93,8 @@ async function loadAlerts() {
 }
 
 async function ackAlert(id) {
-  // PUT /alerts/{id}/ack  (base "/alerts" + path "/{id}/ack")
-  await fetch(apiUrl(cfg.ALERTS_BASE_URL, `/${id}/ack`), {
+  // /alerts/alerts/{id}/ack -> rewrite => /alerts/{id}/ack
+  await fetch(apiUrl(cfg.ALERTS_BASE_URL, `/alerts/${id}/ack`), {
     method: "PUT",
     headers: { ...authHeaders() }
   });
@@ -125,8 +124,8 @@ async function loadHistory() {
   }
 
   try {
-    // GET /telemetry/readings?plotId=...&take=200  (base "/telemetry" + path "/readings")
-    const url = new URL(apiUrl(cfg.TELEMETRY_BASE_URL, "/readings"));
+    // /telemetry/telemetry/readings -> rewrite => /telemetry/readings
+    const url = new URL(apiUrl(cfg.TELEMETRY_BASE_URL, "/telemetry/readings"));
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("take", "200");
 
@@ -188,8 +187,8 @@ async function loadProperties() {
   if (btnNewPlot) btnNewPlot.disabled = true;
 
   try {
-    // GET /properties (base "/properties" + path "/")
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/"), { headers: { ...authHeaders() } });
+    // /properties/properties -> rewrite => /properties
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/properties"), { headers: { ...authHeaders() } });
     if (res.status === 401) return (window.location.href = "login.html");
     if (!res.ok) throw new Error(await res.text());
 
@@ -218,14 +217,14 @@ async function loadPlots(propertyId) {
   plotSel.innerHTML = `<option value="">Carregando talhões...</option>`;
 
   try {
-    // GET /properties/{propertyId}/plots  (base "/properties" + path "/{propertyId}/plots")
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/${propertyId}/plots`), { headers: { ...authHeaders() } });
+    // /properties/properties/{id}/plots -> rewrite => /properties/{id}/plots
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`), { headers: { ...authHeaders() } });
     if (res.status === 401) return (window.location.href = "login.html");
     if (!res.ok) throw new Error(await res.text());
 
     const items = await res.json();
-
     plotSel.innerHTML = `<option value="">Selecione...</option>`;
+
     for (const pl of items) {
       const opt = document.createElement("option");
       opt.value = pl.id;
@@ -317,8 +316,7 @@ document.getElementById("btnSaveProperty")?.addEventListener("click", async () =
   }
 
   try {
-    // POST /properties (base "/properties" + path "/")
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/"), {
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, "/properties"), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, location })
@@ -358,8 +356,7 @@ document.getElementById("btnSavePlot")?.addEventListener("click", async () => {
   }
 
   try {
-    // POST /properties/{propertyId}/plots
-    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/${propertyId}/plots`), {
+    const res = await fetch(apiUrl(cfg.PROPERTIES_BASE_URL, `/properties/${propertyId}/plots`), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ name, crop })
@@ -395,17 +392,11 @@ document.getElementById("btnSend").addEventListener("click", async () => {
   const temperatureC = Number(document.getElementById("temperatureC").value);
   const precipitationMm = Number(document.getElementById("precipitationMm").value);
 
-  const body = {
-    plotId,
-    timestamp: new Date().toISOString(),
-    soilMoisture,
-    temperatureC,
-    precipitationMm
-  };
+  const body = { plotId, timestamp: new Date().toISOString(), soilMoisture, temperatureC, precipitationMm };
 
   try {
-    // POST /telemetry/readings (base "/telemetry" + path "/readings")
-    const res = await fetch(apiUrl(cfg.TELEMETRY_BASE_URL, "/readings"), {
+    // /telemetry/telemetry/readings -> rewrite => /telemetry/readings
+    const res = await fetch(apiUrl(cfg.TELEMETRY_BASE_URL, "/telemetry/readings"), {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body)
@@ -437,8 +428,7 @@ async function refreshPlotStatus(plotId) {
   badge.textContent = "Carregando...";
 
   try {
-    // GET /alerts?plotId=...&ack=false  (base "/alerts" + path "/")
-    const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/"));
+    const url = new URL(apiUrl(cfg.ALERTS_BASE_URL, "/alerts"));
     url.searchParams.set("plotId", plotId);
     url.searchParams.set("ack", "false");
 
